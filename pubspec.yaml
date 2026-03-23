@@ -67,11 +67,13 @@ flutter:
   # To add assets to your application, add an assets section, like this:
   assets:
     # ANATOMY
-    - assets/models/ANATOMY/brain.glb
+    - assets/models/ANATOMY/BRAIN.glb
     - assets/models/ANATOMY/EAR.glb
     - assets/models/ANATOMY/EYE.glb
     - assets/models/ANATOMY/LUNGS.glb
     - assets/models/ANATOMY/STOMACH.glb
+    - assets/models/ANATOMY/heart.glb
+
 
     # ASTRONOMY
     - assets/models/ASTRONOMY/earth.glb

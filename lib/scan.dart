@@ -56,7 +56,7 @@ class _ScanScreenState extends State<ScanScreen>
       // Known model → go straight to AR
       await Navigator.push(
         context,
-        _arRoute(entry),
+        _arRoute(raw),
       );
     } else {
       // Unknown QR → show generic result sheet
@@ -70,12 +70,11 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
-  PageRoute _arRoute(ModelEntry entry) => PageRouteBuilder(
-    pageBuilder: (_, anim, __) => ArEarthMapScreen(),
-    transitionsBuilder: (_, anim, __, child) => FadeTransition(
-      opacity: anim,
-      child: child,
-    ),
+  PageRoute _arRoute(String qrText) => PageRouteBuilder(
+    pageBuilder: (_, anim, __) =>
+        ArEarthMapScreen(qrValue: qrText),
+    transitionsBuilder: (_, anim, __, child) =>
+        FadeTransition(opacity: anim, child: child),
     transitionDuration: const Duration(milliseconds: 600),
   );
 
