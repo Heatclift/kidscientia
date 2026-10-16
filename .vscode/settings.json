@@ -1,0 +1,6 @@
+{
+  "dart.projectSearchDepth": 1,
+  "dart.analysisExcludedFolders": [
+    "arcore_flutter_plugin-0.1.0/example"
+  ]
+}

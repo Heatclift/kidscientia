@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
-import 'model_registry.dart';
+import 'ar_session_gate.dart';
 import 'ar_view_screen.dart';
+import 'model_registry.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -24,10 +25,12 @@ class _ScanScreenState extends State<ScanScreen>
   bool _isScanned = false;
   bool _isTorchOn = false;
   bool _isDisposed = false;
+  bool _isPreparingAr = false;
 
   @override
   void initState() {
     super.initState();
+    ArSessionGate.ensureInitialized();
     _createScannerController();
     _animController = AnimationController(
       vsync: this,
@@ -69,8 +72,15 @@ class _ScanScreenState extends State<ScanScreen>
       await _releaseScannerController();
       if (!mounted || _isDisposed) return;
 
-      // Known model → go straight to AR
-      await Navigator.push(context, _arRoute(qrKey));
+      // Wait until any previous AR/Filament teardown finishes.
+      if (mounted) setState(() => _isPreparingAr = true);
+      await ArSessionGate.waitUntilReady();
+      if (!mounted || _isDisposed) return;
+      if (mounted) setState(() => _isPreparingAr = false);
+
+      // Known model → replace scanner with AR so back lands on Dashboard
+      await Navigator.pushReplacement(context, _arRoute(qrKey));
+      return;
     } else {
       await _stopScanner(controller);
       if (!mounted || _isDisposed) return;
@@ -123,6 +133,9 @@ class _ScanScreenState extends State<ScanScreen>
     } catch (e) {
       debugPrint('Scanner dispose failed: $e');
     }
+
+    // Give CameraX / prior ARCore teardown time to release the camera.
+    await Future<void>.delayed(const Duration(milliseconds: 600));
   }
 
   Future<void> _stopScanner(MobileScannerController controller) async {
@@ -187,6 +200,27 @@ class _ScanScreenState extends State<ScanScreen>
             },
           ),
           const _BottomHint(),
+          if (_isPreparingAr)
+            Container(
+              color: Colors.black.withValues(alpha: 0.72),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      'Preparing AR…',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
         ],
       ),
     );

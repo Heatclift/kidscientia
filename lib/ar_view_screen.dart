@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vector_math/vector_math_64.dart' as vector64;
 
+import 'ar_session_gate.dart';
 import 'model_registry.dart';
 
 class ArEarthMapScreen extends StatefulWidget {
@@ -14,23 +15,79 @@ class ArEarthMapScreen extends StatefulWidget {
   State<ArEarthMapScreen> createState() => _ArEarthMapScreenState();
 }
 
-class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
+class _ArEarthMapScreenState extends State<ArEarthMapScreen>
+    with WidgetsBindingObserver {
   ArCoreController? _arController;
   ModelEntry? _modelEntry;
+  ArCoreAvailability? _arAvailability;
+  bool _isCheckingAr = false;
   bool _isLoading = true;
   bool _isPlaced = false;
   bool _showInstructions = true;
   bool _isClosing = false;
   bool _showInfoCard = false;
+  bool _isStartingAr = false;
+  String? _arStartError;
+  /// Bumps each screen instance so Android PlatformViews are never recycled.
+  static int _nextArViewEpoch = 0;
+  late final int _arViewEpoch;
 
   @override
   void initState() {
     super.initState();
+    _arViewEpoch = ++_nextArViewEpoch;
+    ArSessionGate.ensureInitialized();
+    WidgetsBinding.instance.addObserver(this);
     _modelEntry = ModelRegistry.resolve(widget.qrValue);
     if (_modelEntry != null) {
       _preloadModel(_modelEntry!.assetPath);
+      _checkArAvailability();
     } else {
       setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check after the user comes back from installing Google Play Services for AR.
+    if (state == AppLifecycleState.resumed &&
+        _arAvailability != null &&
+        _arAvailability != ArCoreAvailability.SUPPORTED_INSTALLED) {
+      _checkArAvailability();
+    }
+  }
+
+  Future<void> _checkArAvailability() async {
+    if (_isCheckingAr) return;
+    _isCheckingAr = true;
+
+    ArCoreAvailability availability;
+    try {
+      availability = await ArCoreController.getArCoreAvailability();
+    } catch (e) {
+      debugPrint("⚠️ ARCore availability check failed: $e");
+      availability = ArCoreAvailability.UNKNOWN_ERROR;
+    } finally {
+      _isCheckingAr = false;
+    }
+
+    if (mounted && !_isClosing) {
+      setState(() => _arAvailability = availability);
+    }
+  }
+
+  Future<void> _requestArCoreInstall() async {
+    try {
+      final installed = await ArCoreController.requestArCoreInstall();
+      if (installed) await _checkArAvailability();
+    } on PlatformException catch (e) {
+      debugPrint("⚠️ ARCore install request failed: ${e.code} ${e.message}");
+      if (!mounted || _isClosing) return;
+      setState(() {
+        _arAvailability = e.code == "UNSUPPORTED"
+            ? ArCoreAvailability.UNSUPPORTED_DEVICE_NOT_CAPABLE
+            : ArCoreAvailability.UNKNOWN_ERROR;
+      });
     }
   }
 
@@ -51,6 +108,20 @@ class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
 
     _arController = controller;
     controller.onPlaneTap = _onPlaneTap;
+    controller.onArReady = () {
+      if (!mounted || _isClosing) return;
+      setState(() {
+        _isStartingAr = false;
+        _arStartError = null;
+      });
+    };
+    controller.onError = (message) {
+      if (!mounted || _isClosing) return;
+      setState(() {
+        _isStartingAr = false;
+        _arStartError = message;
+      });
+    };
   }
 
   Future<void> _onPlaneTap(List<ArCoreHitTestResult> hits) async {
@@ -82,6 +153,7 @@ class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _detachArController();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
@@ -94,38 +166,73 @@ class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
     controller.onPlaneTap = null;
     controller.onNodeTap = null;
     controller.onError = null;
+    controller.onArReady = null;
     controller.onPlaneDetected = null;
     controller.onTrackingImage = null;
     _arController = null;
   }
 
-  bool _handleBackNavigation() {
-    if (_isClosing) return false;
-
+  Future<void> _close() async {
+    if (_isClosing) return;
     _isClosing = true;
+
+    final controller = _arController;
+    final hadLiveAr = controller != null;
     _detachArController();
-    return true;
+
+    if (hadLiveAr) {
+      ArSessionGate.beginTeardown();
+    }
+
+    // Soft-dispose (pause) while the view is still mounted, then remove it so
+    // Flutter's PlatformView.dispose can destroy Sceneform after detach.
+    if (controller != null) {
+      try {
+        await controller.dispose();
+      } catch (e) {
+        debugPrint("AR controller dispose failed: $e");
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {});
+    await WidgetsBinding.instance.endOfFrame;
+
+    if (hadLiveAr) {
+      // Waits for delayed native teardown signal + engine-idle poll.
+      await ArSessionGate.waitUntilReady();
+    }
+
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  Future<void> _startArSession() async {
+    if (_isClosing) return;
+    await ArSessionGate.waitUntilReady();
+    if (!mounted || _isClosing) return;
+    setState(() {
+      _showInstructions = false;
+      _isStartingAr = true;
+      _arStartError = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    final arAvailability = _arAvailability;
+    final isArReady = arAvailability == ArCoreAvailability.SUPPORTED_INSTALLED;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (_handleBackNavigation() && mounted) {
-          Navigator.of(context).pop();
-        }
+        _close();
       },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () {
-              if (_handleBackNavigation() && mounted) {
-                Navigator.of(context).pop();
-              }
-            },
+            onPressed: _close,
           ),
           title: Text(_modelEntry?.displayName ?? "Model Not Found"),
           centerTitle: true,
@@ -139,24 +246,35 @@ class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
               )
             : Stack(
                 children: [
-                  if (!_isClosing)
+                  if (!_isClosing &&
+                      isArReady &&
+                      !_showInstructions &&
+                      !_isLoading)
                     ArCoreView(
+                      // Force a fresh PlatformView each AR open (avoid recycled HC state).
+                      key: ValueKey('arcore_${widget.qrValue}_$_arViewEpoch'),
                       onArCoreViewCreated: _onArViewCreated,
                       enablePlaneRenderer: true,
                       enableTapRecognizer: true,
-                    ),
-                  if (_isLoading)
+                    )
+                  else
+                    const ColoredBox(color: Colors.black),
+                  if (_isLoading || arAvailability == null)
                     Container(
                       color: Colors.black.withValues(alpha: 0.45),
-                      child: const Center(
+                      child: Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            CircularProgressIndicator(color: Colors.white),
-                            SizedBox(height: 16),
+                            const CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                            const SizedBox(height: 16),
                             Text(
-                              "Loading model…",
-                              style: TextStyle(
+                              _isLoading
+                                  ? "Loading model…"
+                                  : "Checking AR support…",
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 16,
                               ),
@@ -165,10 +283,42 @@ class _ArEarthMapScreenState extends State<ArEarthMapScreen> {
                         ),
                       ),
                     )
+                  else if (!isArReady)
+                    _ArUnavailableOverlay(
+                      availability: arAvailability,
+                      modelName: _modelEntry!.displayName,
+                      onInstall: _requestArCoreInstall,
+                      onBack: _close,
+                    )
                   else if (_showInstructions)
                     _InstructionsOverlay(
                       modelName: _modelEntry!.displayName,
-                      onStart: () => setState(() => _showInstructions = false),
+                      onStart: _startArSession,
+                    )
+                  else if (_arStartError != null)
+                    _ArStartErrorOverlay(
+                      message: _arStartError!,
+                      onBack: _close,
+                    )
+                  else if (_isStartingAr)
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      child: const Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(color: Colors.white),
+                            SizedBox(height: 16),
+                            Text(
+                              "Starting camera…",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     )
                   else if (!_isPlaced)
                     Positioned(
@@ -573,6 +723,231 @@ class _StepCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shown when the AR camera fails to start after the user taps Start
+// ─────────────────────────────────────────────────────────────────────────────
+class _ArStartErrorOverlay extends StatelessWidget {
+  final String message;
+  final VoidCallback onBack;
+
+  const _ArStartErrorOverlay({
+    required this.message,
+    required this.onBack,
+  });
+
+  static const _teal = Color(0xFF5BBFBF);
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black.withValues(alpha: 0.88),
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.orange.shade400, width: 2),
+                  ),
+                  child: Icon(
+                    Icons.videocam_off_rounded,
+                    color: Colors.orange.shade400,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  "Couldn't start the AR camera",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontSize: 14,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: onBack,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _teal,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      "Go Back",
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shown instead of AR when Google Play Services for AR is missing, outdated,
+// or not supported on this phone
+// ─────────────────────────────────────────────────────────────────────────────
+class _ArUnavailableOverlay extends StatelessWidget {
+  final ArCoreAvailability availability;
+  final String modelName;
+  final VoidCallback onInstall;
+  final VoidCallback onBack;
+
+  const _ArUnavailableOverlay({
+    required this.availability,
+    required this.modelName,
+    required this.onInstall,
+    required this.onBack,
+  });
+
+  static const _teal = Color(0xFF5BBFBF);
+
+  @override
+  Widget build(BuildContext context) {
+    final (String title, String message, String? installLabel) =
+        switch (availability) {
+          ArCoreAvailability.UNSUPPORTED_DEVICE_NOT_CAPABLE => (
+            "AR isn't supported on this phone",
+            "This phone can't run Google Play Services for AR, so the $modelName can't be placed in AR here. Try scanning the flashcard on another phone.",
+            null,
+          ),
+          ArCoreAvailability.SUPPORTED_APK_TOO_OLD => (
+            "Update needed for AR",
+            "Google Play Services for AR needs an update before the $modelName can appear in AR.",
+            "Update Google Play Services for AR",
+          ),
+          ArCoreAvailability.SUPPORTED_NOT_INSTALLED => (
+            "AR needs one more app",
+            "Install Google Play Services for AR, then come back here to place the $modelName.",
+            "Install Google Play Services for AR",
+          ),
+          _ => (
+            "AR may not work on this phone",
+            "This phone couldn't confirm that it supports Google Play Services for AR, which is needed to place the $modelName in AR.",
+            "Try Installing Anyway",
+          ),
+        };
+
+    return Container(
+      color: Colors.black.withValues(alpha: 0.88),
+      child: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.orange.shade400, width: 2),
+                  ),
+                  child: Icon(
+                    Icons.view_in_ar_rounded,
+                    color: Colors.orange.shade400,
+                    size: 32,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.65),
+                    fontSize: 14,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: installLabel != null ? onInstall : onBack,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _teal,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: Text(
+                      installLabel ?? "Go Back",
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                if (installLabel != null) ...[
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: onBack,
+                    child: Text(
+                      "Go Back",
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

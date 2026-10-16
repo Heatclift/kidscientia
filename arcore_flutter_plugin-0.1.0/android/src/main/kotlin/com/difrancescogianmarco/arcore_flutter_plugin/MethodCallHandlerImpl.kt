@@ -2,8 +2,10 @@ package com.difrancescogianmarco.arcore_flutter_plugin
 
 import android.app.Activity
 import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.google.ar.core.ArCoreApk
+import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
@@ -12,6 +14,8 @@ import io.flutter.plugin.common.MethodChannel
 class MethodCallHandlerImpl(private val activity: Activity, private val messenger: BinaryMessenger) : MethodChannel.MethodCallHandler {
     private var methodChannel: MethodChannel? = null
     private val UTILS_CHANNEL_NAME = "arcore_flutter_plugin/utils"
+    private val MAX_AVAILABILITY_CHECKS = 25
+    private val AVAILABILITY_CHECK_INTERVAL_MS = 200L
 
     init {
         methodChannel = MethodChannel(messenger, UTILS_CHANNEL_NAME)
@@ -33,6 +37,18 @@ class MethodCallHandlerImpl(private val activity: Activity, private val messenge
                     result.success(isInstalled)
                 }
             }
+            "getArCoreAvailability" -> {
+                checkAvailability(0) { availability ->
+                    Log.i(ArcoreFlutterPlugin.TAG, "getArCoreAvailability: $availability")
+                    result.success(availability.name)
+                }
+            }
+            "requestArCoreInstall" -> {
+                requestArCoreInstall(result)
+            }
+            "isArEngineReady" -> {
+                result.success(!ArCoreView.isEngineBusy)
+            }
             else -> {
                 result.notImplemented()
             }
@@ -51,6 +67,37 @@ class MethodCallHandlerImpl(private val activity: Activity, private val messenge
                 }
             }, 200)
         } else handler(availability.isSupported)
+    }
+
+    private fun checkAvailability(attempt: Int, handler: (ArCoreApk.Availability) -> Unit) {
+        val availability = try {
+            ArCoreApk.getInstance().checkAvailability(activity)
+        } catch (e: Exception) {
+            Log.e(ArcoreFlutterPlugin.TAG, e.toString())
+            ArCoreApk.Availability.UNKNOWN_ERROR
+        }
+
+        if (!availability.isTransient) {
+            handler(availability)
+        } else if (attempt < MAX_AVAILABILITY_CHECKS) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                checkAvailability(attempt + 1, handler)
+            }, AVAILABILITY_CHECK_INTERVAL_MS)
+        } else {
+            handler(ArCoreApk.Availability.UNKNOWN_TIMED_OUT)
+        }
+    }
+
+    private fun requestArCoreInstall(result: MethodChannel.Result) {
+        try {
+            val status = ArCoreApk.getInstance().requestInstall(activity, true)
+            result.success(status == ArCoreApk.InstallStatus.INSTALLED)
+        } catch (e: UnavailableDeviceNotCompatibleException) {
+            result.error("UNSUPPORTED", e.localizedMessage, null)
+        } catch (e: Exception) {
+            Log.e(ArcoreFlutterPlugin.TAG, e.toString())
+            result.error("UNAVAILABLE", e.localizedMessage, null)
+        }
     }
 
     private fun isARServicesInstalled(handler: (Boolean) -> Unit) {

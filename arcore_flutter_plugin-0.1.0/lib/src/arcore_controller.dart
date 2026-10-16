@@ -19,6 +19,17 @@ typedef ArCoreAugmentedImageTrackingHandler = void Function(
 
 const UTILS_CHANNEL_NAME = 'arcore_flutter_plugin/utils';
 
+/// Value names must match `com.google.ar.core.ArCoreApk.Availability`.
+enum ArCoreAvailability {
+  UNKNOWN_ERROR,
+  UNKNOWN_CHECKING,
+  UNKNOWN_TIMED_OUT,
+  UNSUPPORTED_DEVICE_NOT_CAPABLE,
+  SUPPORTED_NOT_INSTALLED,
+  SUPPORTED_APK_TOO_OLD,
+  SUPPORTED_INSTALLED,
+}
+
 class ArCoreController {
   static checkArCoreAvailability() async {
     final bool arcoreAvailable = await MethodChannel(UTILS_CHANNEL_NAME)
@@ -30,6 +41,26 @@ class ArCoreController {
     final bool arcoreInstalled = await MethodChannel(UTILS_CHANNEL_NAME)
         .invokeMethod('checkIfARCoreServicesInstalled');
     return arcoreInstalled;
+  }
+
+  /// Checks ARCore support without opening any install or store screen.
+  static Future<ArCoreAvailability> getArCoreAvailability() async {
+    final String? availability = await MethodChannel(UTILS_CHANNEL_NAME)
+        .invokeMethod<String>('getArCoreAvailability');
+    return ArCoreAvailability.values.firstWhere(
+        (value) => value.toString() == 'ArCoreAvailability.$availability',
+        orElse: () => ArCoreAvailability.UNKNOWN_ERROR);
+  }
+
+  /// Opens the Google Play Services for AR install flow.
+  ///
+  /// Returns true if it is already installed, false if the install screen was
+  /// shown. Throws a [PlatformException] with code `UNSUPPORTED` when the
+  /// device cannot run ARCore.
+  static Future<bool> requestArCoreInstall() async {
+    final bool? installed = await MethodChannel(UTILS_CHANNEL_NAME)
+        .invokeMethod<bool>('requestArCoreInstall');
+    return installed ?? false;
   }
 
   ArCoreController(
@@ -51,8 +82,10 @@ class ArCoreController {
   final bool? enablePlaneRenderer;
   final bool? debug;
   late MethodChannel _channel;
+  Future<void>? _disposeFuture;
   StringResultHandler? onError;
   StringResultHandler? onNodeTap;
+  void Function()? onArReady;
 
 //  UnsupportedHandler onUnsupported;
   ArCoreHitResultHandler? onPlaneTap;
@@ -67,6 +100,8 @@ class ArCoreController {
         'enablePlaneRenderer': enablePlaneRenderer,
         'enableUpdateListener': enableUpdateListener,
       });
+      // Resume is owned by the native surfaceCreated / lifecycle path so
+      // Session.resume is not called twice without a GL context.
     } on PlatformException catch (ex) {
       print(ex.message);
     }
@@ -82,6 +117,9 @@ class ArCoreController {
         if (onError != null) {
           onError!(call.arguments);
         }
+        break;
+      case 'onArReady':
+        onArReady?.call();
         break;
       case 'onNodeTap':
         if (onNodeTap != null) {
@@ -236,8 +274,19 @@ class ArCoreController {
     });
   }
 
-  void dispose() {
-    _channel.invokeMethod<void>('dispose');
+  Future<void> dispose() {
+    // Idempotent: _close and ArCoreViewState.dispose share one in-flight teardown.
+    return _disposeFuture ??= _disposeNative();
+  }
+
+  Future<void> _disposeNative() async {
+    try {
+      await _channel.invokeMethod<void>('dispose');
+    } on MissingPluginException {
+      // Native handler already cleared by a prior dispose.
+    } on PlatformException {
+      // Native side already torn down.
+    }
   }
 
   void resume() {

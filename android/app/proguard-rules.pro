@@ -4,3 +4,8 @@
 -dontwarn com.google.ar.sceneform.assets.Loader
 -dontwarn com.google.ar.sceneform.assets.ModelData
 -dontwarn com.google.devtools.build.android.desugar.runtime.ThrowableExtension
+
+# ML Kit (used by mobile_scanner) creates its component registrars by reflection.
+# With AGP 9's strict R8 keep rules, firebase-components' class-only rule no
+# longer keeps their constructors, so the barcode scanner fails in release builds.
+-keep class * implements com.google.firebase.components.ComponentRegistrar { <init>(); }
