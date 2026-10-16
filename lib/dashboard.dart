@@ -1,5 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'scan.dart';
+import 'minigame/level_map_screen.dart';
+import 'minigame/zoology_level_select_screen.dart';
+import 'minigame/anatomy_level_select_screen.dart';
+import 'minigame/astronomy_level_select_screen.dart';
+import 'minigame/geology_level_select_screen.dart';
+import 'personal_info.dart';
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
 
@@ -45,76 +52,98 @@ class DashboardScreen extends StatelessWidget {
 class _Header extends StatelessWidget {
   const _Header();
 
+  Future<String> _loadFirstName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final firstName = prefs.getString('user_first_name')?.trim() ?? '';
+    return firstName;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        // Title + subtitle
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Text(
-                "Welcome, Kiddos!",
-                style: TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.w900,
-                  color: Colors.black,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              SizedBox(height: 2),
-              Text(
-                "Where your kids learn.",
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.black45,
-                  fontWeight: FontWeight.w400,
-                ),
-              ),
-            ],
-          ),
-        ),
+    return FutureBuilder<String>(
+      future: _loadFirstName(),
+      builder: (context, snapshot) {
+        final firstName = snapshot.data?.trim() ?? '';
+        final welcomeText =
+            firstName.isEmpty ? 'Welcome, Kiddos!' : 'Welcome, $firstName!';
 
-        // Avatar with yellow edit badge
-        Stack(
-          clipBehavior: Clip.none,
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF5FC4C4),
-                image: const DecorationImage(
-                  image: AssetImage("assets/images/avatar.png"),
-                  fit: BoxFit.cover,
-                ),
-                border: Border.all(color: Colors.white, width: 2),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    welcomeText,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.black,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    "Where your kids learn.",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.black45,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ],
               ),
             ),
-            // Yellow pencil badge
-            Positioned(
-              bottom: 0,
-              right: 0,
-              child: Container(
-                width: 18,
-                height: 18,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFFCC00),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.edit,
-                  size: 11,
-                  color: Colors.white,
-                ),
+
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PersonalInfoScreen(),
+                  ),
+                );
+              },
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: const Color(0xFF5FC4C4),
+                      image: const DecorationImage(
+                        image: AssetImage("assets/images/avatar.png"),
+                        fit: BoxFit.cover,
+                      ),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    right: 0,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFFCC00),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        size: 11,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -215,7 +244,25 @@ class SubjectCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) {
+            if (label == 'ZOOLOGY')    return const ZoologyLevelSelectScreen();
+            if (label == 'ANATOMY')    return const AnatomyLevelSelectScreen();
+            if (label == 'ASTRONOMY')  return const AstronomyLevelSelectScreen();
+            if (label == 'GEOLOGY')    return const GeologyLevelSelectScreen();
+            return LevelMapScreen(
+              category: label,
+              mapAsset: label == 'BOTANY'
+                  ? 'assets/images/maps/botany_map.png'
+                  : null,
+            );
+          },
+        ),
+      ),
+      child: Column(
       children: [
         // Rounded image tile with shadow
         Container(
@@ -253,6 +300,7 @@ class SubjectCard extends StatelessWidget {
           ),
         ),
       ],
+      ),
     );
   }
 }

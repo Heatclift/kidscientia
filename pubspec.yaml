@@ -121,6 +121,7 @@ flutter:
     - assets/models/ZOOLOGY/seaturtle.glb
     - assets/models/ZOOLOGY/whiterhino.glb
     - assets/images/
+    - assets/images/maps/
 
 
   # An image asset can refer to one or more resolution-specific "variants", see

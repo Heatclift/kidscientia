@@ -53,6 +53,8 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
     private val RC_PERMISSIONS = 0x123
     private var sceneUpdateListener: Scene.OnUpdateListener
     private var faceSceneUpdateListener: Scene.OnUpdateListener
+    private var isDisposed = false
+    private var lifecycleRegistered = false
 
     //AUGMENTEDFACE
     private var faceRegionsRenderable: ModelRenderable? = null
@@ -169,6 +171,11 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
 
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (isDisposed && call.method != "dispose") {
+            result.success(null)
+            return
+        }
+
         when (call.method) {
             "init" -> {
                 arScenViewInit(call, result, activity)
@@ -293,6 +300,7 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
         }
 
         activity.application.registerActivityLifecycleCallbacks(this.activityLifecycleCallbacks)
+        lifecycleRegistered = true
     }
 
     private fun onSingleTap(tap: MotionEvent?) {
@@ -387,7 +395,7 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
                             methodChannel.invokeMethod("onNodeTap", hitTestResult.node?.name)
                             return@setOnTouchListener true
                         }
-                        return@setOnTouchListener gestureDetector.onTouchEvent(event)
+                        return@setOnTouchListener event != null && gestureDetector.onTouchEvent(event)
                     }
         }
         val enableUpdateListener: Boolean? = call.argument("enableUpdateListener")
@@ -513,16 +521,35 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
     }
 
     override fun dispose() {
+        if (isDisposed) {
+            return
+        }
+
         if (arSceneView != null) {
             onPause()
             onDestroy()
+        }
+
+        isDisposed = true
+
+        try {
+            methodChannel.setMethodCallHandler(null)
+        } catch (ignored: Exception) {
+        }
+
+        if (lifecycleRegistered) {
+            try {
+                activity.application.unregisterActivityLifecycleCallbacks(activityLifecycleCallbacks)
+            } catch (ignored: Exception) {
+            }
+            lifecycleRegistered = false
         }
     }
 
     fun onResume() {
         debugLog("onResume()")
 
-        if (arSceneView == null) {
+        if (isDisposed || arSceneView == null) {
             return
         }
 
@@ -576,6 +603,10 @@ class ArCoreView(val activity: Activity, context: Context, messenger: BinaryMess
     }
 
     fun onPause() {
+        if (isDisposed) {
+            return
+        }
+
         if (arSceneView != null) {
             arSceneView?.pause()
         }

@@ -11,9 +11,7 @@ class SignUpScreen extends StatefulWidget {
 
 class _SignUpScreenState extends State<SignUpScreen>
     with TickerProviderStateMixin {
-
-  // ── Role selection ─────────────────────────────────────────────────────
-  String _selectedRole = 'Learner'; // 'Learner' or 'Teacher'
+  static const String _selectedRole = 'User';
 
   // ── Form controllers ───────────────────────────────────────────────────
   final TextEditingController _firstNameController = TextEditingController();
@@ -83,7 +81,7 @@ class _SignUpScreenState extends State<SignUpScreen>
     _moonController.forward();
   }
 
-@override
+  @override
   void dispose() {
     _firstNameController.dispose();
     _lastNameController.dispose();
@@ -115,7 +113,7 @@ class _SignUpScreenState extends State<SignUpScreen>
     await prefs.setString('user_gender', gender);
     await prefs.setBool('is_logged_in', true);
 
-// Navigate to login screen after successful sign up
+    // Navigate to login screen after successful sign up.
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -160,14 +158,15 @@ class _SignUpScreenState extends State<SignUpScreen>
       return;
     }
 
-// Save user data to SharedPreferences
+    // Save user data to SharedPreferences.
     _saveUserData(
       email: email,
       password: password,
       firstName: firstName,
       lastName: lastName,
       role: _selectedRole,
-dob: _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '',
+      dob:
+          _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '',
       gender: _selectedGender ?? '',
     );
   }
@@ -269,29 +268,6 @@ dob: _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '
 
                           const SizedBox(height: 20),
 
-                          // ── Role selector ─────────────────────────────
-                          Row(
-                            children: [
-                              _RoleTile(
-                                label: 'Learner',
-                                imagePath: 'assets/images/learner.png', // 🔁
-                                isSelected: _selectedRole == 'Learner',
-                                onTap: () =>
-                                    setState(() => _selectedRole = 'Learner'),
-                              ),
-                              const SizedBox(width: 16),
-                              _RoleTile(
-                                label: 'Teacher',
-                                imagePath: 'assets/images/teacher.png', // 🔁
-                                isSelected: _selectedRole == 'Teacher',
-                                onTap: () =>
-                                    setState(() => _selectedRole = 'Teacher'),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 20),
-
                           // ── First Name ────────────────────────────────
                           TextField(
                             controller: _firstNameController,
@@ -328,7 +304,8 @@ dob: _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '
                                   color: Colors.black45,
                                 ),
                                 onPressed: () => setState(
-                                        () => _obscurePassword = !_obscurePassword),
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
                               ),
                             ),
                           ),
@@ -347,9 +324,10 @@ dob: _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '
                                       : Icons.visibility_off_outlined,
                                   color: Colors.black45,
                                 ),
-                                onPressed: () => setState(() =>
-                                _obscureConfirmPassword =
-                                !_obscureConfirmPassword),
+                                onPressed: () => setState(
+                                  () => _obscureConfirmPassword =
+                                      !_obscureConfirmPassword,
+                                ),
                               ),
                             ),
                           ),
@@ -525,71 +503,6 @@ dob: _selectedMonth != null ? '$_selectedMonth $_selectedDay $_selectedYear' : '
           ),
 
         ],
-      ),
-    );
-  }
-}
-
-// ── Role Tile Widget ─────────────────────────────────────────────────────────
-class _RoleTile extends StatelessWidget {
-  final String label;
-  final String imagePath;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _RoleTile({
-    required this.label,
-    required this.imagePath,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-        width: 100,
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF5BBFBF) : const Color(0xFFF0F0F0),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected
-                ? const Color(0xFF5BBFBF)
-                : Colors.transparent,
-            width: 2,
-          ),
-          boxShadow: isSelected
-              ? [
-            BoxShadow(
-              color: const Color(0xFF5BBFBF).withOpacity(0.35),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            )
-          ]
-              : [],
-        ),
-        child: Column(
-          children: [
-            Image.asset(
-              imagePath,
-              height: 56,
-              fit: BoxFit.contain,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : Colors.black54,
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
